@@ -7,7 +7,7 @@
 # Add User Messaging feature
 # Lots of other things
 
-#import os
+import os
 import re
 import socket
 import sys
@@ -30,6 +30,9 @@ irc_connection.connect((IRC_HOST, IRC_PORT))
 irc_connection.send("USER " + IRC_NICK + " " + IRC_NICK + " " + IRC_NICK + " " + IRC_NICK + "\n")
 irc_connection.send("NICK " + IRC_NICK + "\n")
 irc_connection.send("JOIN " + IRC_CHAN + "\n")
+
+if not os.path.exists(MAILBOX_FILE):
+    open(MAILBOX_FILE, 'w').close() 
 
 def sendChannelMessage(msg):
 	irc_connection.send("PRIVMSG " + IRC_CHAN + " :" + msg + "\n")
