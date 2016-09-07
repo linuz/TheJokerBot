@@ -49,8 +49,8 @@ def getNamesFromChannel():
 	return names.split(' ')
 	
 def addMessageQueue(msg_to, msg):
-	mailbox = open(MAILBOX_FILE, 'w')
-	mailbox.write(msg_to + ":::" + msg)
+	mailbox = open(MAILBOX_FILE, 'a+')
+	mailbox.write(msg_to + ":::" + msg + "\n")
 	mailbox.close()
 	print "Added to message queue"
 	
