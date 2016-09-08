@@ -1,2 +1,6 @@
 *~
 mailbox.txt
+settings.py
+jokerbot.log
+.idea
+*.pyc
