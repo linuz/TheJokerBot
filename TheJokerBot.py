@@ -1,145 +1,153 @@
 #!/usr/bin/python
 
-#To Do:
-# Add Help
+# To Do:
 # Add ChangeLog
-# Add To Do
 # Add User Messaging feature
-# Lots of other things
-
+# Add AIML chat functionality
+# docopt - Allow command line options to override default settings file or specific options
+# Add optional password login for registered IRC nicks
+# !help - List commands and options
+# !weather - Houston 5 day weather forecast
+# !events - List upcoming HAHA nights and any other notable events (BBQ?)
+# !remind - Set a reminder
+# !links - Show the last X links posted in chat to catch up on missed items
+import logging
 import os
 import re
 import socket
-import sys
 import urllib2
+import settings
 
-IRC_HOST = "chat.freenode.net"
-IRC_PORT = 6667
-IRC_CHAN = "#HoustonHackers"
-IRC_NICK = "TheJokerBot"
-IRC_PASS = ""
-IRC_MENT = ":" + IRC_NICK + ":"
-MAILBOX_FILE = "mailbox.txt"
 
-opener = urllib2.build_opener()
-opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+class JokerBot:
+    def __init__(self):
+        logging.basicConfig(filename=settings.LOG_FILE, level=logging.INFO)
+        logging.info("Initializing " + settings.IRC_NICK)
+        self.irc_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.irc_connection.connect((settings.IRC_HOST, settings.IRC_PORT))
 
-irc_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-irc_connection.connect((IRC_HOST, IRC_PORT))
+        self.irc_connection.send("USER " + settings.IRC_NICK + " " + settings.IRC_NICK + " " + settings.IRC_NICK + " " + settings.IRC_NICK + "\n")
+        self.irc_connection.send("NICK " + settings.IRC_NICK + "\n")
+        self.irc_connection.send("JOIN " + settings.IRC_CHAN + "\n")
 
-irc_connection.send("USER " + IRC_NICK + " " + IRC_NICK + " " + IRC_NICK + " " + IRC_NICK + "\n")
-irc_connection.send("NICK " + IRC_NICK + "\n")
-irc_connection.send("JOIN " + IRC_CHAN + "\n")
+    def send_channel_message(self, msg):
+        self.irc_connection.send("PRIVMSG " + settings.IRC_CHAN + " :" + msg + "\n")
 
-if not os.path.exists(MAILBOX_FILE):
-    open(MAILBOX_FILE, 'w').close() 
+    def get_names_from_channel(self):
+        self.irc_connection.send("NAMES " + settings.IRC_CHAN + "\n")
+        names_msg = self.irc_connection.recv(2048).strip()
+        logging.info("Users in " + settings.IRC_CHAN + ": " + names_msg)
+        names = names_msg.split(':', 2)[2]
+        names = names.replace('\r', '')
+        names = names.replace('\n', '')
+        names = names.replace('@', '')
+        names = names.replace('+', '')
+        return names.split(' ')
 
-def sendChannelMessage(msg):
-	irc_connection.send("PRIVMSG " + IRC_CHAN + " :" + msg + "\n")
+    def search_mailbox(self, user):
+        if not os.path.exists(settings.MAILBOX_FILE):
+            # If there is no mailbox file, there's nothing to search through
+            return
+        mailbox = open(settings.MAILBOX_FILE, 'r')
+        messages = mailbox.readlines()
+        mailbox.close()
+        for message in messages:
+            mailbox_to, mailbox_msg = message.split(":::", 1)
+            mailbox_msg.replace('\n', '')
+            if mailbox_to.lower() == user.lower():
+                logging.info("Message found for " + mailbox_to)
+                self.send_channel_message(mailbox_to + ": " + mailbox_msg)
+                mailbox = open(settings.MAILBOX_FILE, 'r+')
+                lines = mailbox.readlines()
+                mailbox.truncate(0)
+                mailbox.seek(0)
+                for line in lines:
+                    if not line == message:
+                        mailbox.write(line)
+                mailbox.close()
 
-def getNamesFromChannel():
-	irc_connection.send("NAMES " + IRC_CHAN + "\n")
-	names_msg = irc_connection.recv(2048)
-	print names_msg
-	names = names_msg.split(':', 2)[2]
-	names = names.replace('\r', '')
-	names = names.replace('\n', '')
-	names = names.replace('@', '')
-	names = names.replace('+', '')
-	return names.split(' ')
-	
-def addMessageQueue(msg_to, msg):
-	mailbox = open(MAILBOX_FILE, 'a+')
-	mailbox.write(msg_to + ":::" + msg + "\n")
-	mailbox.close()
-	print "Added to message queue"
-	
-def searchMailbox(user):
-	mailbox = open(MAILBOX_FILE, 'r')
-	messages = mailbox.readlines()
-	mailbox.close()
-	for message in messages:
-		mailbox_to, mailbox_msg = message.split(":::",1)
-		mailbox_msg.replace('\n', '')
-		if mailbox_to.lower() == user.lower():
-			print "Message found for " + mailbox_to
-			sendChannelMessage(mailbox_to + ": " + mailbox_msg)
-			mailbox = open(MAILBOX_FILE, 'r+')
-			lines = mailbox.readlines()
-			mailbox.truncate(0)
-			mailbox.seek(0)
-			for line in lines:
-				if not line == message:
-					mailbox.write(line)
-			mailbox.close()
-		
-while 1:
-	msg_header = ""
-	msg_text = ""
-	msg = irc_connection.recv(2048)
-	msgLower = msg.lower()
-	
-	# Respond to IRC ping
-	if msg.find("PING") != -1:
-		msg_text = msg.split()[1]
-		irc_connection.send("PONG " + msg_text + "\n")
-		continue
-	else:
-		print msg
-	
-	# Respond to message pings	
-	if msgLower.find(":!ping") != -1:
-		msg_header, msg_text = msg.split(":!ping")
-		sendChannelMessage('pong' + msg_text)
-		
-	# Respond to mentions - to Remove
-	if msgLower.find(IRC_MENT.lower()) != -1:
-		msg_header, msg_text = msg.split(IRC_MENT)
-		greetings = ["hi", "hello"]
-		if any(a in msg_text.lower() for a in greetings):
-			sendChannelMessage(':Hello!')
-			
-	# Parse links mentioned in channel
-	if msgLower.find(IRC_CHAN.lower()) != -1:
-		url = re.search(r'((http|https)://.*)', msg, re.I)
-		if url:
-			url = url.group()
-			try:
-				website_response = opener.open(url).read()
-			except Exception as e:
-				print '<' + url + '>: ' + str(e)
-			else:
-				website_title = re.search(r'<title.*?>(.*?)</title>', website_response, re.I|re.M|re.S)
-				if website_title:
-					website_title = website_title.group(1)
-					website_title = website_title.replace("\n", "")
-					website_title = website_title.replace("\r", "")
-					website_title = website_title.replace("\t", " ")
-					website_title = website_title.strip()
-					sendChannelMessage('[' + website_title + ']')
-	
-	# User messaging functionality
-	if msgLower.find(":!tell") != -1:
-		msg_header, msg_text = msg.split(":!tell")
-		msg_from = msg_header.split('!')[0][1:]
-		msg_text = msg_text.strip()
-		if ' ' in msg_text:
-			msg_to, msg_text = msg_text.split(' ', 1)
-			msg_text = msg_from + ' says "' + msg_text + '"'
-			nameExists = 0
-			for name in getNamesFromChannel():
-				if name.lower() == msg_to.lower():
-					nameExists = 1
-					sendChannelMessage(msg_from + ": " + msg_to	+ " is already in this channel. No need for me to pass the message along. :)")
-					break
-			if not nameExists:
-				addMessageQueue(msg_to, msg_text)
-				sendChannelMessage(msg_from + ": I will relay the message to " + msg_to + " when they get back.")
-		else:
-			sendChannelMessage(msg_from + ": You need to supply a message.")
-			
-	if msgLower.find(" join " + IRC_CHAN.lower()) != -1:
-		if msgLower.find(" privmsg " + IRC_CHAN.lower()) == -1: 
-			new_user = msg.split('!')[0][1:]
-			print "Searching mailbox for messages for " + new_user
-			searchMailbox(new_user)
+    def add_message_queue(self, msg_to, msg):
+        if not os.path.exists(settings.MAILBOX_FILE):  # Ensure the mailbox file exists
+            open(settings.MAILBOX_FILE, 'w').close()
+        mailbox = open(settings.MAILBOX_FILE, 'a+')
+        mailbox.write(msg_to + ":::" + msg + "\n")
+        mailbox.close()
+        logging.info("Added to message queue")
+
+    def start(self):
+        while True:
+            msg = self.irc_connection.recv(2048)
+            msg_lower = msg.lower()
+
+            # Respond to IRC ping
+            if msg.find("PING") != -1:
+                msg_text = msg.split()[1]
+                self.irc_connection.send("PONG " + msg_text + "\n")
+                continue
+
+            # Respond to message pings
+            if msg_lower.find(":!ping") != -1:
+                msg_header, msg_text = msg.split(":!ping")
+                self.send_channel_message('pong' + msg_text)
+
+            # Respond to mentions - to Remove
+            if msg_lower.find(settings.IRC_MENTION.lower()) != -1:
+                msg_header, msg_text = msg.split(settings.IRC_MENTION)
+                greetings = ["hi", "hello"]
+                if any(a in msg_text.lower() for a in greetings):
+                    self.send_channel_message(':Hello!')
+
+            # Parse links mentioned in channel
+            # TODO ignore the MOTD link
+            if msg_lower.find(settings.IRC_CHAN.lower()) != -1:
+                url = re.search(r'((http|https)://.*)', msg, re.I)
+                if url:
+                    url = url.group()
+                    opener = urllib2.build_opener()
+                    opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+                    try:
+                        website_response = opener.open(url).read()
+                    except Exception as e:
+                        logging.warning('<' + url + '>: ' + str(e))
+                    else:
+                        website_title = re.search(r'<title.*?>(.*?)</title>', website_response, re.I | re.M | re.S)
+                        if website_title:
+                            website_title = website_title.group(1)
+                            website_title = website_title.replace("\n", "")
+                            website_title = website_title.replace("\r", "")
+                            website_title = website_title.replace("\t", " ")
+                            website_title = website_title.strip()
+                            self.send_channel_message('[' + website_title + ']')
+
+            # User messaging functionality
+            if msg_lower.find(":!tell") != -1:
+                msg_header, msg_text = msg.split(":!tell")
+                sender = msg_header.split('!')[0][1:]
+                msg_text = msg_text.strip()
+                if ' ' in msg_text:
+                    recipient, msg_text = msg_text.split(' ', 1)
+                    msg_text = sender + ' says "' + msg_text + '"'
+                    name_exists = 0
+                    for name in self.get_names_from_channel():
+                        if name.lower() == recipient.lower():
+                            name_exists = 1
+                            self.send_channel_message(
+                                sender + ": " + recipient + " is already in this channel. No need for me to pass the message along. :)")
+                            break
+                    if not name_exists:
+                        self.add_message_queue(recipient, msg_text)
+                        self.send_channel_message(sender + ": I will relay the message to " + recipient + " when they get back.")
+                else:
+                    self.send_channel_message(sender + ": You need to supply a message.")
+
+            if msg_lower.find(" join " + settings.IRC_CHAN.lower()) != -1:
+                if msg_lower.find(" privmsg " + settings.IRC_CHAN.lower()) == -1:
+                    new_user = msg.split('!')[0][1:]
+                    logging.info("Searching mailbox for messages for " + new_user)
+                    self.search_mailbox(new_user)
+
+
+# If this script is run directly, start up the bot with the command line options or settings from the settings file
+if __name__ == '__main__':
+    bot = JokerBot()
+    bot.start()
